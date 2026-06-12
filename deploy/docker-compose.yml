@@ -16,9 +16,6 @@ services:
   # Sub2API Application
   # ===========================================================================
   sub2api:
-    build:
-      context: ..
-      dockerfile: Dockerfile
     image: sub2api:local
     container_name: sub2api
     restart: unless-stopped

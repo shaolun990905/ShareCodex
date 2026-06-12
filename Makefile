@@ -1,12 +1,9 @@
 .PHONY: build build-backend build-frontend build-datamanagementd test test-backend test-frontend test-frontend-critical test-datamanagementd secret-scan \
-        deploy deploy-init deploy-sync deploy-up deploy-down deploy-restart deploy-logs deploy-status deploy-pull deploy-nginx
+        deploy deploy-init deploy-down deploy-restart deploy-logs deploy-status deploy-nginx
 
 # =============================================================================
-# Deployment Configuration
+# Build
 # =============================================================================
-SSH_HOST   ?= racknerd-self
-DEPLOY_DIR ?= /root/sub2api
-COMPOSE_FILE = docker-compose.yml
 
 FRONTEND_CRITICAL_VITEST := \
 	src/views/auth/__tests__/LinuxDoCallbackView.spec.ts \
@@ -31,6 +28,10 @@ build-frontend:
 build-datamanagementd:
 	@cd datamanagement && go build -o datamanagementd ./cmd/datamanagementd
 
+# =============================================================================
+# Test
+# =============================================================================
+
 # 运行测试（后端 + 前端）
 test: test-backend test-frontend
 
@@ -52,17 +53,49 @@ secret-scan:
 	@python3 tools/secret_scan.py
 
 # =============================================================================
-# Remote Deployment (SSH_HOST=racknerd-self, DEPLOY_DIR=/root/sub2api)
+# Remote Deployment
+# =============================================================================
+# SSH_HOST  : SSH config alias for the server (default: racknerd-self)
+# DEPLOY_DIR: docker-compose + .env directory on server (default: /root/sub2api)
+# REPO_DIR  : source code directory on server for remote build (default: /root/sub2api-src)
+#
+# Typical workflow:
+#   First time : make deploy-init   # create .env with random secrets
+#   Code change: make deploy        # build locally + deploy
+#   Config only: make deploy-sync   # push docker-compose/.env changes only
 # =============================================================================
 
-# 首次部署：在服务器建目录、同步配置、生成 .env、启动服务
-deploy: deploy-sync deploy-up
+SSH_HOST   ?= racknerd-self
+DEPLOY_DIR ?= /root/sub2api
+REPO_DIR   ?= /root/sub2api-src
 
-# 在服务器上初始化目录并生成 .env（仅首次执行一次）
+# 代码有修改时使用：本地构建前端 → 同步源码 → 服务器构建 Go → 重启容器
+deploy:
+	@echo ">>> [1/4] Building frontend locally ..."
+	@pnpm --dir frontend install --frozen-lockfile
+	@pnpm --dir frontend exec vite build
+	@echo ">>> [2/4] Syncing source code to $(SSH_HOST):$(REPO_DIR) ..."
+	@rsync -az --exclude='.git' --exclude='frontend/node_modules' --exclude='backend/vendor' \
+	  --exclude='deploy/.env' --exclude='deploy/data/' --exclude='deploy/postgres_data/' --exclude='deploy/redis_data/' \
+	  . $(SSH_HOST):$(REPO_DIR)/
+	@echo ">>> [3/4] Syncing deploy configs to $(SSH_HOST):$(DEPLOY_DIR) ..."
+	@ssh $(SSH_HOST) "mkdir -p $(DEPLOY_DIR) && rsync -a --exclude='.env' $(REPO_DIR)/deploy/ $(DEPLOY_DIR)/"
+	@echo ">>> [4/4] Building image (Go only) and restarting services on $(SSH_HOST) ..."
+	@ssh $(SSH_HOST) "cd $(REPO_DIR) && docker build -f Dockerfile.prebuilt -t sub2api:local . \
+	  && docker compose -f $(DEPLOY_DIR)/docker-compose.yml up -d --pull never"
+	@echo ">>> Deploy complete. Visit https://8k23h5ly.yagao.online"
+
+# 仅同步 deploy/ 配置文件（不重建镜像，不重启）
+deploy-sync:
+	@echo ">>> Syncing deploy configs to $(SSH_HOST):$(DEPLOY_DIR) ..."
+	@rsync -az --exclude='.env' --exclude='data/' --exclude='postgres_data/' --exclude='redis_data/' \
+	  deploy/ $(SSH_HOST):$(DEPLOY_DIR)/
+
+# 首次部署：在服务器上初始化 .env（自动生成随机密钥）
 deploy-init:
 	@echo ">>> Initializing $(SSH_HOST):$(DEPLOY_DIR) ..."
 	@ssh $(SSH_HOST) "mkdir -p $(DEPLOY_DIR)"
-	@ssh $(SSH_HOST) "[ -f $(DEPLOY_DIR)/.env ] && echo '.env already exists, skipping generation' || \
+	@ssh $(SSH_HOST) "[ -f $(DEPLOY_DIR)/.env ] && echo '.env already exists, skipping.' || \
 	  (cd $(DEPLOY_DIR) && \
 	   JWT_SECRET=\$$(openssl rand -hex 32) && \
 	   TOTP_KEY=\$$(openssl rand -hex 32) && \
@@ -71,47 +104,26 @@ deploy-init:
 	   sed -i \"s/^JWT_SECRET=.*/JWT_SECRET=\$$JWT_SECRET/\" .env && \
 	   sed -i \"s/^TOTP_ENCRYPTION_KEY=.*/TOTP_ENCRYPTION_KEY=\$$TOTP_KEY/\" .env && \
 	   sed -i \"s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=\$$PG_PASS/\" .env && \
-	   chmod 600 .env && \
-	   echo '.env generated successfully')"
-
-# 将本地 deploy/ 目录（配置文件）同步到服务器（排除 .env 和数据目录）
-deploy-sync:
-	@echo ">>> Syncing deploy configs to $(SSH_HOST):$(DEPLOY_DIR) ..."
-	@rsync -avz --exclude='.env' --exclude='data/' --exclude='postgres_data/' --exclude='redis_data/' \
-	  deploy/ $(SSH_HOST):$(DEPLOY_DIR)/
-	@echo ">>> Sync done. Run 'make deploy-init' if this is the first deployment."
-
-# 在服务器上拉取最新镜像并启动/更新服务
-deploy-up:
-	@echo ">>> Pulling latest image and starting services on $(SSH_HOST) ..."
-	@ssh $(SSH_HOST) "cd $(DEPLOY_DIR) && docker compose pull && docker compose up -d"
-
-# 仅拉取最新镜像（不重启服务）
-deploy-pull:
-	@echo ">>> Pulling latest image on $(SSH_HOST) ..."
-	@ssh $(SSH_HOST) "cd $(DEPLOY_DIR) && docker compose pull"
-
-# 重启所有服务（拉取最新镜像）
-deploy-restart:
-	@echo ">>> Restarting services on $(SSH_HOST) ..."
-	@ssh $(SSH_HOST) "cd $(DEPLOY_DIR) && docker compose pull && docker compose up -d"
+	   chmod 600 .env && echo '.env generated.')"
 
 # 停止并移除容器（保留数据卷）
 deploy-down:
-	@echo ">>> Stopping services on $(SSH_HOST) ..."
 	@ssh $(SSH_HOST) "cd $(DEPLOY_DIR) && docker compose down"
 
-# 查看远程日志（Ctrl+C 退出）
+# 重启服务（不重建镜像）
+deploy-restart:
+	@ssh $(SSH_HOST) "cd $(DEPLOY_DIR) && docker compose up -d"
+
+# 实时查看日志（Ctrl+C 退出）
 deploy-logs:
 	@ssh -t $(SSH_HOST) "cd $(DEPLOY_DIR) && docker compose logs -f --tail=100"
 
-# 查看服务运行状态
+# 查看容器运行状态
 deploy-status:
 	@ssh $(SSH_HOST) "cd $(DEPLOY_DIR) && docker compose ps"
 
-# 上传 Nginx 配置并重载（需要服务器已有 Nginx）
+# 上传 Nginx 配置并重载
 deploy-nginx:
-	@echo ">>> Uploading Nginx config to $(SSH_HOST) ..."
 	@scp deploy/nginx-sub2api.conf $(SSH_HOST):/etc/nginx/conf.d/sub2api.conf
 	@ssh $(SSH_HOST) "nginx -t && systemctl reload nginx"
 	@echo ">>> Nginx reloaded. Visit https://8k23h5ly.yagao.online"
