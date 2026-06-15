@@ -120,6 +120,43 @@ func APIKeyFromService(k *service.APIKey) *APIKey {
 	return out
 }
 
+func UserAPIKeyFromService(k *service.APIKey) *UserAPIKey {
+	if k == nil {
+		return nil
+	}
+	base := APIKeyFromService(k)
+	return &UserAPIKey{
+		ID:            base.ID,
+		UserID:        base.UserID,
+		Key:           base.Key,
+		Name:          base.Name,
+		GroupID:       base.GroupID,
+		Status:        base.Status,
+		IPWhitelist:   base.IPWhitelist,
+		IPBlacklist:   base.IPBlacklist,
+		LastUsedAt:    base.LastUsedAt,
+		Quota:         base.Quota,
+		QuotaUsed:     base.QuotaUsed,
+		ExpiresAt:     base.ExpiresAt,
+		CreatedAt:     base.CreatedAt,
+		UpdatedAt:     base.UpdatedAt,
+		RateLimit5h:   base.RateLimit5h,
+		RateLimit1d:   base.RateLimit1d,
+		RateLimit7d:   base.RateLimit7d,
+		Usage5h:       base.Usage5h,
+		Usage1d:       base.Usage1d,
+		Usage7d:       base.Usage7d,
+		Window5hStart: base.Window5hStart,
+		Window1dStart: base.Window1dStart,
+		Window7dStart: base.Window7dStart,
+		Reset5hAt:     base.Reset5hAt,
+		Reset1dAt:     base.Reset1dAt,
+		Reset7dAt:     base.Reset7dAt,
+		User:          base.User,
+		Group:         UserGroupFromService(k.Group),
+	}
+}
+
 func GroupFromServiceShallow(g *service.Group) *Group {
 	if g == nil {
 		return nil
@@ -133,6 +170,38 @@ func GroupFromService(g *service.Group) *Group {
 		return nil
 	}
 	return GroupFromServiceShallow(g)
+}
+
+func UserGroupFromService(g *service.Group) *UserGroup {
+	if g == nil {
+		return nil
+	}
+	return &UserGroup{
+		ID:                              g.ID,
+		Name:                            g.Name,
+		Description:                     g.Description,
+		Platform:                        g.Platform,
+		IsExclusive:                     g.IsExclusive,
+		Status:                          g.Status,
+		SubscriptionType:                g.SubscriptionType,
+		DailyLimitUSD:                   g.DailyLimitUSD,
+		WeeklyLimitUSD:                  g.WeeklyLimitUSD,
+		MonthlyLimitUSD:                 g.MonthlyLimitUSD,
+		AllowImageGeneration:            g.AllowImageGeneration,
+		ImageRateIndependent:            g.ImageRateIndependent,
+		ImagePrice1K:                    g.ImagePrice1K,
+		ImagePrice2K:                    g.ImagePrice2K,
+		ImagePrice4K:                    g.ImagePrice4K,
+		ClaudeCodeOnly:                  g.ClaudeCodeOnly,
+		FallbackGroupID:                 g.FallbackGroupID,
+		FallbackGroupIDOnInvalidRequest: g.FallbackGroupIDOnInvalidRequest,
+		AllowMessagesDispatch:           g.AllowMessagesDispatch,
+		RequireOAuthOnly:                g.RequireOAuthOnly,
+		RequirePrivacySet:               g.RequirePrivacySet,
+		RPMLimit:                        g.RPMLimit,
+		CreatedAt:                       g.CreatedAt,
+		UpdatedAt:                       g.UpdatedAt,
+	}
 }
 
 // GroupFromServiceAdmin converts a service Group to DTO for admin users.
