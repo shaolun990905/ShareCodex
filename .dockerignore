@@ -11,9 +11,11 @@
 *.md
 !deploy/DOCKER.md
 # docs/legal/ must NOT be excluded: imported as ?raw assets by frontend build
-docs/ADMIN_PAYMENT_INTEGRATION_API.md
-docs/PAYMENT.md
-docs/PAYMENT_CN.md
+!docs/ADMIN_PAYMENT_INTEGRATION_API.md
+!docs/PAYMENT.md
+!docs/PAYMENT_CN.md
+!docs/legal/
+!docs/legal/*.md
 
 # IDE
 .idea/

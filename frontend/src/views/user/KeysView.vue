@@ -33,6 +33,35 @@
 
       <template #actions>
         <div class="flex justify-end gap-3">
+        <div class="relative">
+          <button
+            @click="showColumnSettings = !showColumnSettings"
+            class="btn btn-secondary"
+            :title="t('keys.columnSettings')"
+          >
+            <Icon name="cog" size="md" />
+          </button>
+          <div
+            v-if="showColumnSettings"
+            class="absolute right-0 top-full z-20 mt-2 w-56 rounded-lg border border-gray-200 bg-white p-2 shadow-lg dark:border-dark-700 dark:bg-dark-800"
+          >
+            <button
+              v-for="column in toggleableColumns"
+              :key="column.key"
+              type="button"
+              class="flex w-full items-center justify-between rounded-md px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-dark-200 dark:hover:bg-dark-700"
+              @click="toggleColumn(column.key)"
+            >
+              <span>{{ column.label }}</span>
+              <Icon
+                v-if="!hiddenColumnKeys.has(column.key)"
+                name="check"
+                size="sm"
+                class="text-primary-500"
+              />
+            </button>
+          </div>
+        </div>
         <button
           @click="loadApiKeys"
           :disabled="loading"
@@ -131,6 +160,10 @@
                 </svg>
               </button>
             </div>
+          </template>
+
+          <template #cell-current_concurrency="{ value }">
+            <span class="text-sm text-gray-700 dark:text-dark-300">{{ value ?? 0 }}</span>
           </template>
 
           <template #cell-usage="{ row }">
@@ -302,6 +335,12 @@
               {{ formatDateTime(value) }}
             </span>
             <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
+          </template>
+
+          <template #cell-last_used_ip="{ value }">
+            <span data-test="last-used-ip" class="text-sm text-gray-500 dark:text-dark-400">
+              {{ value || '-' }}
+            </span>
           </template>
 
           <template #cell-created_at="{ value }">
@@ -1091,18 +1130,67 @@ const appStore = useAppStore()
 const onboardingStore = useOnboardingStore()
 const { copyToClipboard: clipboardCopy } = useClipboard()
 
-const columns = computed<Column[]>(() => [
+const COLUMN_SETTINGS_STORAGE_KEY = 'api-key-hidden-columns'
+const COLUMN_SETTINGS_VERSION_KEY = 'api-key-column-settings-version'
+const COLUMN_SETTINGS_VERSION = '2'
+const DEFAULT_HIDDEN_COLUMNS = ['rate_limit', 'last_used_at', 'last_used_ip']
+const ALWAYS_VISIBLE_COLUMNS = new Set(['name', 'actions'])
+
+const loadHiddenColumns = () => {
+  const stored = localStorage.getItem(COLUMN_SETTINGS_STORAGE_KEY)
+  const storedVersion = localStorage.getItem(COLUMN_SETTINGS_VERSION_KEY)
+  let hidden = stored ? JSON.parse(stored) as string[] : [...DEFAULT_HIDDEN_COLUMNS]
+
+  if (stored && storedVersion !== COLUMN_SETTINGS_VERSION && !hidden.includes('last_used_ip')) {
+    hidden = [...hidden, 'last_used_ip']
+  }
+
+  localStorage.setItem(COLUMN_SETTINGS_STORAGE_KEY, JSON.stringify(hidden))
+  localStorage.setItem(COLUMN_SETTINGS_VERSION_KEY, COLUMN_SETTINGS_VERSION)
+  return hidden
+}
+
+const hiddenColumnKeys = ref(new Set<string>(loadHiddenColumns()))
+const showColumnSettings = ref(false)
+
+const allColumns = computed<Column[]>(() => [
   { key: 'name', label: t('common.name'), sortable: true },
   { key: 'key', label: t('keys.apiKey'), sortable: false },
   { key: 'group', label: t('keys.group'), sortable: false },
+  { key: 'current_concurrency', label: t('keys.currentConcurrency'), sortable: true },
   { key: 'usage', label: t('keys.usage'), sortable: false },
   { key: 'rate_limit', label: t('keys.rateLimitColumn'), sortable: false },
   { key: 'expires_at', label: t('keys.expiresAt'), sortable: true },
   { key: 'status', label: t('common.status'), sortable: true },
   { key: 'last_used_at', label: t('keys.lastUsedAt'), sortable: true },
+  { key: 'last_used_ip', label: t('keys.lastUsedIP'), sortable: true },
   { key: 'created_at', label: t('keys.created'), sortable: true },
   { key: 'actions', label: t('common.actions'), sortable: false }
 ])
+
+const columns = computed<Column[]>(() =>
+  allColumns.value.filter((column) => !hiddenColumnKeys.value.has(column.key))
+)
+
+const toggleableColumns = computed<Column[]>(() =>
+  allColumns.value.filter((column) => !ALWAYS_VISIBLE_COLUMNS.has(column.key))
+)
+
+const persistHiddenColumns = () => {
+  localStorage.setItem(COLUMN_SETTINGS_STORAGE_KEY, JSON.stringify([...hiddenColumnKeys.value]))
+  localStorage.setItem(COLUMN_SETTINGS_VERSION_KEY, COLUMN_SETTINGS_VERSION)
+}
+
+const toggleColumn = (key: string) => {
+  const next = new Set(hiddenColumnKeys.value)
+  if (next.has(key)) {
+    next.delete(key)
+  } else {
+    next.add(key)
+  }
+  hiddenColumnKeys.value = next
+  persistHiddenColumns()
+}
 
 const apiKeys = ref<ApiKey[]>([])
 const groups = ref<Group[]>([])
